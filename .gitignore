@@ -40,3 +40,29 @@ data/audio/
 
 # Conda
 .conda/
+
+# Legacy / development scripts (not part of the agent architecture)
+Bzhan/
+GPTinterface.py
+PingBaidu.py
+VisualPost.py
+VisualPostTest.py
+ZhiPu.py
+deepseek.py
+deepseek copy.py
+douyin.proto
+douyin_pb2.py
+gptasw.py
+output.txt
+sample.mp4
+serverPost3000.py
+serverPost3000Return.py
+time out.py
+v7-持续获取.py
+v7-持续获取00.py
+抖音apiUse.py
+说明文档.md
+
+# Large binaries
+*.exe
+*.mp4
