@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+wheelhouse/
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store
+Desktop.ini
+
+# Project runtime data (user-specific, not for sharing)
+data/audio/
+*.log
+*.mp3
+*.wav
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Conda
+.conda/

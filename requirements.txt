@@ -1,0 +1,38 @@
+# LiveStream-Agent 依赖清单
+# ==============================
+# 安装方式：pip install -r requirements.txt
+#
+# 说明：
+#   - protobuf 可能需要从 .proto 文件生成 _pb2.py，使用: protoc --python_out=. douyin.proto
+#   - edge-tts 为纯 Python 实现，无需额外系统依赖
+#   - 音频播放依赖系统已安装的 mpv 或 ffplay
+
+# ── 核心依赖 ────────────────────────────────────
+
+openai>=1.0.0               # LLM 统一接口（兼容 DeepSeek / GLM / GPT）
+PyYAML>=6.0                 # 配置文件解析
+loguru>=0.7.0               # 日志
+
+# ── 异步与网络 ──────────────────────────────────
+
+aiohttp>=3.9.0              # 异步 HTTP 客户端（平台 API 请求）
+websocket-client>=1.6.0     # WebSocket 客户端（抖音弹幕连接）
+protobuf>=5.26.0            # Protocol Buffers（抖音消息解码）
+requests>=2.31.0            # HTTP 同步请求（页面抓取、初始化）
+
+# ── 数据库（异步 SQLite）────────────────────────
+
+aiosqlite>=0.20.0           # 异步 SQLite 驱动
+
+# ── 语音 ────────────────────────────────────────
+
+edge-tts>=6.1.0             # Microsoft Edge TTS（免费、中文好、支持 SSML）
+
+# ── B站连接器（可选）────────────────────────────
+
+# bilibili-api-python>=16.0.0  # B站直播弹幕 API（根据需要取消注释）
+
+# ── 开发与测试（可选）───────────────────────────
+
+# pytest>=8.0.0
+# pytest-asyncio>=0.23.0

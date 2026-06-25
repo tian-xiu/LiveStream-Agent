@@ -1,0 +1,52 @@
+# LiveStream-Agent 全局配置
+# 所有敏感信息（API Key 等）建议通过环境变量注入，此处仅作模板
+
+agent:
+  name: "小Q"
+  persona: "default"          # 对应 config/personas/ 下的文件名
+  language: "zh-CN"
+
+llm:
+  provider: "openai"          # openai / deepseek / zhipu
+  api_key: "${LLM_API_KEY}"   # 环境变量，或直接填写
+  base_url: "https://api.deepseek.com"  # 根据平台修改
+  model: "deepseek-chat"
+  temperature: 0.8
+  max_tokens: 512
+  timeout: 15                 # 请求超时（秒）
+
+platforms:
+  douyin:
+    enabled: true
+    wss_domain: "webcast5-ws-web-lf.douyin.com"  # WebSocket 域名（可能需要更新）
+  bilibili:
+    enabled: false
+    # room_id 通过命令行参数传入
+
+memory:
+  short_term_size: 20         # 短期记忆：最近 N 条消息
+  long_term_enabled: true     # 是否启用长期记忆（SQLite）
+  db_path: "data/agent_memory.db"
+
+tts:
+  engine: "edge-tts"          # 当前仅支持 edge-tts
+  voice: "zh-CN-XiaoyiNeural" # 默认语音角色
+  rate: "+0%"                 # 全局语速调整（SSML prosody rate）
+  pitch: "+0Hz"               # 全局音调调整
+  output_dir: "data/audio"    # 音频文件输出目录
+  auto_play: true             # 生成后自动播放
+
+pipeline:
+  min_reply_interval: 3       # 最小回复间隔（秒）
+  max_queue_size: 5           # 最大排队消息数
+  user_cooldown: 10           # 同一用户冷却时间（秒）
+  spam_keywords:              # 垃圾消息关键词（包含任一则过滤）
+    - "加微信"
+    - "扫码"
+    - "免费领取"
+  min_message_length: 2       # 最短消息长度（字符）
+
+logging:
+  level: "INFO"
+  rotation: "10 MB"
+  retention: "7 days"
