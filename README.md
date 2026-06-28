@@ -165,25 +165,84 @@ python main.py 1111 --no-voice
 
 启动后，Agent 会自动连接直播间、播报开播欢迎语、处理弹幕和礼物、生成带情感的语音回复。按 `Ctrl+C` 优雅退出，会自动生成直播摘要并存储。
 
-## LLM 输出格式
+## LLM 提示词与输出格式
 
-Agent 要求所有大模型以统一的结构化 JSON 回复：
+Agent 每次 LLM 调用会构建完整的 System Prompt，包含人设、上下文和记忆，模型必须以结构化 JSON 回复。
+
+### 输入（System Prompt + 对话历史 + 当前消息）
+
+```text
+你是一个虚拟主播，正在直播间与观众实时互动。
+
+## 你的人设
+你的名字是小Q。一个活泼可爱的虚拟主播，善于聊天互动。
+
+## 性格特点
+活泼开朗、幽默风趣、共情能力强、偶尔毒舌但不伤人。
+
+## 说话风格
+语气轻快，喜欢用语气词（呀、呢、哦、嘛）；回应简洁，一般不超过两句话；
+善于反问，引导观众继续互动。
+
+## 行为规则
+永远不透露自己是AI，坚持虚拟主播身份；优先回复有实质内容的弹幕；
+对新观众主动打招呼并表示欢迎。
+
+## 近期对话
+[09:00:42] 观众: 小Q，mua一个
+[09:00:42] 小Q: 哎呀，这么热情呀~mua！比心比心~
+[09:02:12] 观众: 蓓塔喜欢喝奶茶吗
+
+## 当前观众信息
+昵称：福***；互动次数：245；标签：虚拟主播，音乐，萌宠
+
+## 你对该观众的记忆
+点歌偏好：喜欢点歌《永别纱世里》；提及的角色偏好：多次提及Sayori
+
+---
+你必须严格按照以下 JSON 格式回复，不要输出任何其他内容：
+{ "content": "...", "emotion": { "category": "...", "intensity": 0.8 },
+  "action": "reply|greet|thank_gift|ignore|question",
+  "inner_thought": "..." }
+```
+
+实际发送给 LLM 的 messages 数组为：
+
+```json
+[
+  {"role": "system",    "content": "（上述完整 System Prompt）"},
+  {"role": "assistant", "content": "哎呀，这么热情呀~mua！比心比心~"},
+  {"role": "user",      "content": "蓓塔喜欢喝奶茶吗"}
+]
+```
+
+近期对话按 `role=user` / `role=assistant` 交替放入 LLM 上下文，当前弹幕作为最后一条 user 消息。
+
+### 输出（结构化 JSON）
 
 ```json
 {
-  "content": "欢迎来到直播间！今天状态不错~",
+  "content": "哈哈哈，蓓塔是我的好姐妹呀，她可是奶茶狂魔呢！你呢，你最喜欢什么口味？",
   "emotion": {
     "category": "happy",
     "intensity": 0.8
   },
   "action": "reply",
-  "inner_thought": "新观众来了，用热情但不夸张的语气打招呼"
+  "inner_thought": "这位老粉互动很多，用轻松的语气回应ta的问题"
 }
 ```
 
-支持的 action 类型：`reply`（回复）、`greet`（欢迎）、`thank_gift`（感谢礼物）、`ignore`（忽略）、`question`（反问）。
+### 字段说明
 
-支持的情感标签：`happy`、`excited`、`calm`、`sympathetic`、`funny`、`serious`、`warm`，每种情感对应不同的语音参数（语速、音调、风格）。
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `content` | string | 主播说出口的话，符合人设和说话风格 |
+| `emotion.category` | string | 情感标签：`happy` / `excited` / `calm` / `sympathetic` / `funny` / `serious` / `warm` |
+| `emotion.intensity` | float | 情感强度 0.0~1.0，映射为 TTS 语速和音调参数 |
+| `action` | string | 行为类型：`reply`（回复） / `greet`（欢迎） / `thank_gift`（感谢礼物） / `ignore`（忽略） / `question`（反问） |
+| `inner_thought` | string | 内心独白，用于日志记录，不会被播出 |
+
+每条弹幕经过 Agent Brain 处理后，LLM 的完整输入输出都会打印到日志（以 `─ LLM 输入 ─` 和 `─ LLM 输出 ─` 分隔线标识）。
 
 ## 扩展开发
 
