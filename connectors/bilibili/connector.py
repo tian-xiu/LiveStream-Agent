@@ -5,6 +5,7 @@ B站直播连接器 — 通过 bilibili_api 接入B站直播间弹幕。
   bilibili-api-python（可选，未安装时连接器不可用）
 """
 
+import asyncio
 from typing import Optional
 
 from connectors.base import BaseConnector, LiveEvent
@@ -125,17 +126,20 @@ class BilibiliConnector(BaseConnector):
             )
             self._emit(live_event)
 
-        # 开始监听（bilibili_api 的 connect 是协程）
-        try:
-            await self._room.connect()
-        except Exception as e:
-            from utils.logger import logger
-            logger.error(f"B站直播间连接失败：{e}")
-            return False
-
+        # 在后台任务中启动 bilibili_api 的 WebSocket 连接（避免阻塞主事件循环）
         self._connected = True
-        from utils.logger import logger
         logger.info(f"B站直播间已连接 → room_id={room_id}")
+
+        async def _run_room():
+            try:
+                await self._room.connect()
+            except Exception as e:
+                from utils.logger import logger
+                logger.error(f"B站直播间 WebSocket 异常退出：{e}")
+            finally:
+                self._connected = False
+
+        asyncio.create_task(_run_room())
         return True
 
     async def disconnect(self) -> None:

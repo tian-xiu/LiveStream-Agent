@@ -106,6 +106,8 @@ class BaseConnector(ABC):
             try:
                 cb(event)
             except Exception as e:
-                # 回调异常不应中断消息流
+                # 回调异常不应中断消息流，但需要记录详细错误
+                import traceback
                 from utils.logger import logger
-                logger.error(f"消息回调异常：{e}")
+                logger.error(f"消息回调异常 ({cb.__name__ if hasattr(cb, '__name__') else type(cb).__name__}): {e}")
+                logger.error(traceback.format_exc())

@@ -29,10 +29,13 @@ from websocket import WebSocketApp, WebSocketConnectionClosedException
 
 from connectors.base import BaseConnector, LiveEvent
 
-# 将项目根目录加入 sys.path，以便导入编译后的 proto 模块
+# 将项目根目录和当前目录加入 sys.path，以便导入编译后的 proto 模块
 _project_root = Path(__file__).resolve().parent.parent.parent
+_current_dir = Path(__file__).resolve().parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
+if str(_current_dir) not in sys.path:
+    sys.path.insert(0, str(_current_dir))
 
 from douyin_pb2 import PushFrame, Response, ChatMessage  # noqa: E402
 
@@ -125,33 +128,65 @@ class DouyinConnector(BaseConnector):
         返回：
             (room_id, room_title, wss_url, ttwid)
         """
-        res = requests.get(
-            url=url,
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/108.0.0.0 Safari/537.36"
-                ),
-            },
-            cookies={"__ac_nonce": "063abcffa00ed8507d599"},
+        session = requests.Session()
+        session.headers.update({
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
+        })
+
+        # 先访问首页获取初始 cookies
+        session.get("https://www.douyin.com/", timeout=10)
+
+        # 从 URL 中提取房间号
+        room_id_match = re.search(r'live\.douyin\.com/(\d+)', url)
+        if not room_id_match:
+            raise RuntimeError("无法从 URL 中提取房间号")
+        room_id = room_id_match.group(1)
+
+        # 使用 douyin webcast API 获取房间信息
+        import time
+        ts = int(time.time() * 1000)
+
+        api_params = {
+            "aid": 6383,
+            "app_name": "douyin_web",
+            "live_id": 1,
+            "device_platform": "web",
+            "room_id": room_id,
+            "_signature": "",
+            "_": ts,
+        }
+
+        api_headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
+            "Referer": url,
+        }
+
+        api_res = session.get(
+            "https://live.douyin.com/webcast/room/web/enter/",
+            params=api_params,
+            headers=api_headers,
             timeout=10,
         )
 
-        # 从页面中提取 RENDER_DATA JSON
+        # 尝试备用 API：直接从页面提取 ttwid 后用另一个接口
+        ttwid = session.cookies.get_dict().get("ttwid", "")
+
+        # 从页面提取房间标题（兜底）
         match = re.search(
-            r'<script id="RENDER_DATA" type="application/json">(.*?)</script>',
-            res.text,
+            r'<title>(.*?)</title>',
+            session.get(url, timeout=10).text,
         )
-        if not match:
-            raise RuntimeError("无法从页面提取 RENDER_DATA，直播间可能不存在")
+        room_title = match.group(1) if match else f"抖音直播间 {room_id}"
 
-        data_dict = json.loads(unquote_plus(match.group(1)))
-        room_info = data_dict["app"]["initialState"]["roomStore"]["roomInfo"]
-        room_id = str(room_info["roomId"])
-        room_title = room_info["room"]["title"]
-
-        # 构建 WebSocket URL
+        # 构建 WebSocket URL（使用基础参数）
         wss_url = (
             "wss://webcast5-ws-web-lf.douyin.com/webcast/im/push/v2/"
             "?app_name=douyin_web"
@@ -170,24 +205,24 @@ class DouyinConnector(BaseConnector):
             "/537.36%20(KHTML,%20like%20Gecko)%20Chrome/86.0.4240.198%20Safari/537.36"
             "&browser_online=true"
             "&tz_name=Asia/Shanghai"
-            "&cursor=t-1710509700366_r-1_d-1_u-1_h-1"
-            "&internal_ext=internal_src:dim|wss_push_room_id:7346551636304792347"
-            "|wss_push_did:7327882786752005658"
-            "|first_req_ms:1710509700318|fetch_time:1710509700366|seq:1"
-            "|wss_info:0-1710509700367-0-0|wrds_v:7346583212400842018"
+            "&cursor=t-1_r-1_d-1_u-1_h-1"
+            "&internal_ext=internal_src:dim|wss_push_room_id:"
+            f"{room_id}"
+            "|wss_push_did:0"
+            "|first_req_ms:" + str(ts) + "|fetch_time:" + str(ts) + "|seq:1"
+            "|wss_info:0-0-0-0|wrds_v:0"
             "&host=https://live.douyin.com"
             "&aid=6383&live_id=1&did_rule=3"
             "&endpoint=live_pc&support_wrds=1"
-            "&user_unique_id=7327882786752005658"
+            "&user_unique_id=0"
             "&im_path=/webcast/im/fetch/"
             "&identity=audience"
             "&need_persist_msg_count=15"
             "&insert_task_id=&live_reason="
             f"&room_id={room_id}"
             "&heartbeatDuration=0"
-            "&signature=WM5aeKYShx2SXKzb"
+            "&signature="
         )
-        ttwid = res.cookies.get_dict().get("ttwid", "")
 
         return room_id, room_title, wss_url, ttwid
 

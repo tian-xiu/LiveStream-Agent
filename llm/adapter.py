@@ -206,6 +206,19 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
         max_tokens = kwargs.pop("max_tokens", self._max_tokens)
 
         try:
+            # 记录 LLM 输入
+            logger.info("─ LLM 输入 ─" + "─" * 60)
+            for i, msg in enumerate(messages):
+                role = msg.get("role", "unknown")
+                content = msg.get("content", "")
+                if role == "system":
+                    logger.info(f"[system] {content}")
+                elif role == "user":
+                    logger.info(f"[user]   {content}")
+                elif role == "assistant":
+                    logger.info(f"[assistant] {content}")
+            logger.info("─" * 70)
+
             response = await self._client.chat.completions.create(
                 model=self._model,
                 messages=messages,  # type: ignore[arg-type]
@@ -216,6 +229,12 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
             content = response.choices[0].message.content
             if content is None:
                 raise ValueError("LLM 返回空内容")
+
+            # 记录 LLM 输出
+            logger.info("─ LLM 输出 ─" + "─" * 60)
+            logger.info(content.strip())
+            logger.info("─" * 70)
+
             return content.strip()
 
         except Exception as e:

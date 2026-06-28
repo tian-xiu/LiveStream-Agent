@@ -23,6 +23,16 @@ LiveStream-Agent 主入口
     启动 → 连接直播间 → 开播欢迎语 → 消息循环处理 → Ctrl+C → 总结 & 退出
 """
 
+# Windows SSL 证书存储补丁（修复某些 Windows 系统上的 ASN1 错误）
+import ssl
+_original_load_verify = ssl.SSLContext.load_verify_locations
+def _patched_load_verify(self, cafile=None, capath=None, cadata=None):
+    try:
+        return _original_load_verify(self, cafile, capath, cadata)
+    except ssl.SSLError:
+        pass
+ssl.SSLContext.load_verify_locations = _patched_load_verify
+
 import argparse
 import asyncio
 import re
@@ -165,7 +175,16 @@ async def main() -> None:
 
     scheduler = create_scheduler_from_config(config)
 
-    # ── 14. 管道编排器 ──────────────────────────────────────
+    # ── 14. 字幕窗口 ────────────────────────────────────────
+    from ui import SubtitleOverlay, DanmakuFeed
+
+    subtitle = SubtitleOverlay()
+    subtitle.start()
+
+    danmaku_feed = DanmakuFeed()
+    danmaku_feed.start()
+
+    # ── 15. 管道编排器 ──────────────────────────────────────
     from pipeline import PipelineOrchestrator
 
     orchestrator = PipelineOrchestrator(
@@ -176,9 +195,11 @@ async def main() -> None:
         msg_filter=msg_filter,
         scheduler=scheduler,
         voice_enabled=voice_enabled,
+        subtitle=subtitle,
+        danmaku_feed=danmaku_feed,
     )
 
-    # ── 15. 启动 ────────────────────────────────────────────
+    # ── 16. 启动 ────────────────────────────────────────────
     try:
         # 开始数据库会话
         session_id = await memory.start_session(
@@ -197,12 +218,28 @@ async def main() -> None:
         if voice_enabled:
             greeting = await brain.greet()
             if greeting and greeting.should_reply():
-                ssml = emotion.to_ssml(
-                    text=greeting.content,
+                # 获取情感语音参数
+                voice_params = emotion.get_voice_params(
                     emotion=greeting.emotion.category,
                     intensity=greeting.emotion.intensity,
                 )
-                await tts.speak(ssml)
+                # 清洗文本（移除 emoji、噪音、XML 标签等）
+                clean_text = emotion._sanitize_for_tts(greeting.content)
+                if clean_text:
+                    # 显示字幕
+                    if subtitle:
+                        subtitle.show(
+                            text=clean_text,
+                            nickname="",
+                            action="greet",
+                        )
+                        await asyncio.sleep(0.1)
+                    # 使用纯文本 + 参数合成
+                    await tts.speak(
+                        text=clean_text,
+                        rate=voice_params.rate,
+                        pitch=voice_params.pitch,
+                    )
 
         # 启动管道处理
         await orchestrator.start()
@@ -218,8 +255,14 @@ async def main() -> None:
         logger.error(f"运行时错误：{e}")
         raise
     finally:
-        # ── 16. 优雅退出 ─────────────────────────────────────
+        # ── 17. 优雅退出 ─────────────────────────────────────
         logger.info("正在关闭...")
+
+        # 停止字幕窗口
+        subtitle.stop()
+
+        # 停止弹幕字幕窗口
+        danmaku_feed.stop()
 
         # 停止管道处理
         await orchestrator.stop()

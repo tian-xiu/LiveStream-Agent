@@ -7,6 +7,9 @@ Agent Brain — 核心决策引擎。
 - 输出结构化响应（文本 + 情感 + 动作）
 """
 
+import asyncio
+import json
+import re
 from typing import Any, Optional
 
 from agent.emotion import EmotionEngine
@@ -84,6 +87,7 @@ class AgentBrain:
             persona=self._persona,
             recent_messages=context["recent_messages"],
             user_profile=context["user_profile"],
+            long_term_memories=context.get("long_term_memories", ""),
         )
 
         # 4. 组装 messages（OpenAI 格式）
@@ -93,13 +97,35 @@ class AgentBrain:
         # 加入近期聊天上下文
         messages.extend(self._memory.short_term.to_chat_format())
 
+        # 加入当前弹幕消息（让 LLM 知道用户说了什么）
+        messages.append({"role": "user", "content": msg.raw_content})
+
         # 5. 调用 LLM
         logger.info(
-            f"Brain 处理消息：user={msg.display_name}, content={msg.raw_content[:50]}"
+            f"Brain 处理消息：user={msg.display_name}, content={msg.raw_content}"
         )
         response = await self._llm.chat(messages)
 
-        # 6. 验证情感标签（如果 LLM 返回非法值，用规则推测）
+        # 6. 保存对话到短期记忆（供后续上下文使用）
+        self._memory.short_term.add("user", msg.raw_content, msg.display_name)
+        if response.should_reply():
+            self._memory.short_term.add("assistant", response.content)
+
+        # 6.5 保存消息到数据库
+        sid = self._memory.persistent.session_id
+        if sid:
+            await self._memory.save_message(sid, "user", msg.raw_content, user_id)
+            if response.should_reply():
+                await self._memory.save_message(
+                    sid, "assistant", response.content, user_id,
+                    emotion=response.emotion.category,
+                    action=response.action,
+                    inner_thought=response.inner_thought,
+                )
+            # 定期提取用户洞察（fire-and-forget，不阻塞主循环）
+            asyncio.create_task(self._maybe_extract_insights(user_id))
+
+        # 7. 验证情感标签（如果 LLM 返回非法值，用规则推测）
         if not EmotionEngine.is_valid(response.emotion.category):
             fallback_emotion = self._emotion.find_best_emotion(response.content)
             logger.info(f"情感标签修正：{response.emotion.category} → {fallback_emotion}")
@@ -119,7 +145,7 @@ class AgentBrain:
             logger.info(
                 f"Brain 响应：action={response.action}, "
                 f"emotion={response.emotion.category}({response.emotion.intensity:.1f}), "
-                f"content={response.content[:50]}..."
+                f"content={response.content}"
             )
 
         return response
@@ -147,7 +173,18 @@ class AgentBrain:
             },
             {"role": "user", "content": prompt},
         ]
-        return await self._llm.chat(messages)
+        response = await self._llm.chat(messages)
+
+        # 保存欢迎语到数据库
+        sid = self._memory.persistent.session_id
+        if sid and response.should_reply():
+            await self._memory.save_message(
+                sid, "assistant", response.content,
+                emotion=response.emotion.category,
+                action="greet",
+            )
+
+        return response
 
     async def thank_gift(
         self, display_name: str, gift_name: str = "礼物", gift_count: int = 1
@@ -175,7 +212,18 @@ class AgentBrain:
             },
             {"role": "user", "content": prompt},
         ]
-        return await self._llm.chat(messages)
+        response = await self._llm.chat(messages)
+
+        # 保存感谢语到数据库
+        sid = self._memory.persistent.session_id
+        if sid and response.should_reply():
+            await self._memory.save_message(
+                sid, "assistant", response.content,
+                emotion=response.emotion.category,
+                action="thank_gift",
+            )
+
+        return response
 
     async def summarize_session(self) -> str:
         """对本场直播生成摘要（用于结束会话时存档）。"""
@@ -200,3 +248,116 @@ class AgentBrain:
     async def end_session(self, summary: str = "") -> None:
         """结束当前数据库会话。"""
         await self._memory.end_session(summary)
+
+    # ── 用户洞察提取（fire-and-forget）────────────
+
+    async def _maybe_extract_insights(self, user_id: int) -> None:
+        """根据互动次数阈值，异步提取用户标签和长期记忆（fire-and-forget）。"""
+        try:
+            interval_tags = self._config.get("tag_extraction_interval", 10)
+            interval_memory = self._config.get("memory_extraction_interval", 15)
+
+            row = await self._memory.persistent._db.fetch_one(
+                "SELECT interaction_count, tags FROM users WHERE id = ?", (user_id,)
+            )
+            if not row:
+                return
+            count = row["interaction_count"]
+
+            if count > 0 and count % interval_tags == 0:
+                asyncio.create_task(self._extract_tags(user_id, row["tags"] or ""))
+
+            if count > 0 and count % interval_memory == 0:
+                asyncio.create_task(self._extract_memories(user_id))
+        except Exception as e:
+            logger.warning(f"用户洞察触发失败：{e}")
+
+    async def _extract_tags(self, user_id: int, existing_tags: str) -> None:
+        """用 LLM 分析近期对话，提取用户兴趣标签。"""
+        try:
+            rows = await self._memory.persistent._db.fetch_all(
+                """SELECT role, content FROM messages
+                   WHERE user_id = ? AND role = 'user'
+                   ORDER BY created_at DESC LIMIT 20""",
+                (user_id,),
+            )
+            if not rows:
+                return
+
+            user_messages = "\n".join(f"- {r['content']}" for r in reversed(rows))
+
+            prompt = f"""根据以下用户的历史弹幕，提取ta的兴趣标签（逗号分隔，最多5个）。
+已有标签：{existing_tags or "无"}
+用户弹幕：
+{user_messages}
+
+请直接输出标签列表（纯文本，逗号分隔），不要JSON或其他格式。"""
+
+            messages = [
+                {"role": "system", "content": "你是一个用户画像分析助手。根据弹幕内容提取兴趣标签。"},
+                {"role": "user", "content": prompt},
+            ]
+            result = await self._llm.chat_raw(messages)
+            result = result.strip()
+
+            # 合并新旧标签，去重
+            new_tags = [t.strip() for t in result.split(",") if t.strip()]
+            old_tags = [t.strip() for t in existing_tags.split(",") if t.strip()] if existing_tags else []
+            all_tags = list(dict.fromkeys(new_tags + old_tags))[:10]  # 最多保留10个
+
+            await self._memory.persistent.update_user_tags(user_id, ",".join(all_tags))
+            logger.info(f"用户标签更新：user_id={user_id}, tags={all_tags}")
+        except Exception as e:
+            logger.warning(f"标签提取失败：{e}")
+
+    async def _extract_memories(self, user_id: int) -> None:
+        """用 LLM 从对话中提取关键信息存入长期记忆。"""
+        try:
+            rows = await self._memory.persistent._db.fetch_all(
+                """SELECT role, content FROM messages
+                   WHERE user_id = ?
+                   ORDER BY created_at DESC LIMIT 30""",
+                (user_id,),
+            )
+            if not rows:
+                return
+
+            conversation = "\n".join(
+                f"[{r['role']}] {r['content'][:100]}" for r in reversed(rows)
+            )
+
+            prompt = f"""从以下对话中提取该观众提到的关键信息。提取内容包括：
+- 个人喜好/偏好（喜欢的游戏、音乐、食物等）
+- 生活习惯（职业、作息、地区等）
+- 明确表达的观点或态度
+- 与主播的关系（老粉、新观众等）
+
+对话：
+{conversation}
+
+请以 JSON 数组格式输出，每个条目包含 key 和 value：
+[{{"key": "偏好/习惯/身份等", "value": "具体内容"}}]
+只输出真正有信息量的内容，不确定的不要编造。如果没有可提取的信息，输出空数组 []。"""
+
+            messages = [
+                {"role": "system", "content": "你是一个信息提取助手。从对话中提取有价值的长期记忆。"},
+                {"role": "user", "content": prompt},
+            ]
+            result = await self._llm.chat_raw(messages)
+
+            # 解析 JSON
+            match = re.search(r"\[.*\]", result, re.DOTALL)
+            if not match:
+                return
+
+            items = json.loads(match.group())
+            for item in items:
+                await self._memory.persistent.remember(
+                    key=item["key"],
+                    value=item["value"],
+                    user_id=user_id,
+                    importance=0.7,
+                )
+            logger.info(f"长期记忆更新：user_id={user_id}, 新增{len(items)}条")
+        except Exception as e:
+            logger.warning(f"长期记忆提取失败：{e}")

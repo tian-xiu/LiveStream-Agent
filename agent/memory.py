@@ -33,7 +33,7 @@ class ShortTermMemory:
         entry = {
             "role": role,
             "content": content,
-            "nickname": nickname or ("AI助手" if role == "agent" else "观众"),
+            "nickname": nickname or ("AI助手" if role in ("agent", "assistant") else "观众"),
             "time": datetime.now().strftime("%H:%M:%S"),
         }
         if len(self._buffer) >= self.max_size:

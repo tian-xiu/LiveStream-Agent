@@ -103,6 +103,7 @@ class PersonaManager:
         persona: Persona,
         recent_messages: str = "",
         user_profile: str = "",
+        long_term_memories: str = "",
         prompt_template_path: str = "config/prompts/system.yaml",
     ) -> str:
         """
@@ -140,6 +141,7 @@ class PersonaManager:
         prompt = prompt.replace("{{ rules }}", "；".join(persona.rules))
         prompt = prompt.replace("{{ recent_messages }}", recent_messages or "（暂无对话记录）")
         prompt = prompt.replace("{{ user_profile }}", user_profile or "（新观众，暂无信息）")
+        prompt = prompt.replace("{{ long_term_memories }}", long_term_memories or "（暂无记忆）")
 
         return prompt
 

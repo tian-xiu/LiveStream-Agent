@@ -51,6 +51,8 @@ class PipelineOrchestrator:
         scheduler: Optional[ResponseScheduler] = None,
         voice_enabled: bool = True,
         skip_filter_for_events: bool = True,
+        subtitle: Optional["SubtitleOverlay"] = None,
+        danmaku_feed = None,   # DanmakuFeed 弹幕字幕窗口
     ):
         """
         参数：
@@ -62,6 +64,8 @@ class PipelineOrchestrator:
             scheduler: 响应调度器（可选，默认创建）
             voice_enabled: 是否启用 TTS 语音输出
             skip_filter_for_events: 礼物/进房等非弹幕事件是否跳过过滤
+            subtitle: 字幕叠加窗口（可选）
+            danmaku_feed: 弹幕滚动字幕窗口（可选）
         """
         self._connector = connector
         self._brain = brain
@@ -71,6 +75,8 @@ class PipelineOrchestrator:
         self._scheduler = scheduler or ResponseScheduler()
         self._voice_enabled = voice_enabled
         self._skip_filter_for_events = skip_filter_for_events
+        self._subtitle = subtitle
+        self._danmaku_feed = danmaku_feed
 
         # 运行时状态
         self._running = False
@@ -178,6 +184,19 @@ class PipelineOrchestrator:
             message_type=event.event_type,
         )
 
+        # 1.1 日志：收到事件
+        if event.event_type == "danmaku":
+            logger.info(f"[弹幕] {event.nickname}: {event.content[:60]}")
+            # 路由到左侧弹幕字幕窗口
+            if self._danmaku_feed:
+                self._danmaku_feed.show(event.nickname, event.content)
+        elif event.event_type == "gift":
+            logger.info(f"[礼物] {event.nickname} -> {event.gift_name} x{event.gift_count}")
+        elif event.event_type == "enter_room":
+            logger.debug(f"[进房] {event.nickname}")
+        elif event.event_type == "like":
+            logger.debug(f"[点赞] {event.nickname}")
+
         # 2. 过滤（非弹幕事件可选跳过）
         if self._skip_filter_for_events and event.event_type != "danmaku":
             pass  # 礼物、进房等不经过垃圾过滤
@@ -185,7 +204,7 @@ class PipelineOrchestrator:
             self._filter.filter(msg)
             if msg.filtered:
                 self._stats["filtered_out"] += 1
-                logger.debug(f"消息被过滤：{msg.filter_reason} | {msg.raw_content[:50]}")
+                logger.info(f"[过滤] {msg.filter_reason} | {event.nickname}: {msg.raw_content[:50]}")
                 return
 
         # 3. 根据事件类型决定是否立即处理
@@ -197,8 +216,9 @@ class PipelineOrchestrator:
             # 弹幕 -> 入队等待调度
             accepted = self._scheduler.enqueue(msg)
             if not accepted:
-                logger.debug(f"调度队列已满，丢弃消息：{msg.raw_content[:50]}")
+                logger.info(f"[队列满] 丢弃 {event.nickname}: {msg.raw_content[:40]}")
                 return
+            logger.debug(f"[入队] {event.nickname}: {msg.raw_content[:50]}")
 
             # 尝试出队处理
             await self._try_dequeue_and_send()
@@ -261,6 +281,8 @@ class PipelineOrchestrator:
         if msg is None:
             return
 
+        logger.info(f"[处理] {msg.display_name}: {msg.raw_content[:50]}")
+
         try:
             # 调用 Agent Brain 生成回复
             response = await self._brain.process(msg)
@@ -285,24 +307,54 @@ class PipelineOrchestrator:
             logger.error(f"Agent 处理异常：{e}")
 
     async def _speak(self, msg: PipelineMessage) -> None:
-        """根据消息内容和情感生成语音并播放。"""
-        if not self._voice_enabled or not msg.ai_content:
+        """根据消息内容和情感生成语音并播放。
+
+        时序设计：
+        1. 立即显示字幕（让用户先看到文字）
+        2. 获取情感语音参数
+        3. 合成语音（纯文本+参数，不使用 SSML）
+        4. 播放语音
+        """
+        if not msg.ai_content:
             return
 
         from utils.logger import logger
 
-        # 情感映射到 SSML
-        ssml = self._emotion.to_ssml(
-            text=msg.ai_content,
+        # 1. 字幕先显示（立即反馈，不等语音合成）
+        if self._subtitle:
+            self._subtitle.show(
+                text=msg.ai_content or "",
+                nickname=msg.display_name,
+                action=msg.message_type,
+            )
+            # 短暂等待，确保字幕窗口刷新完成
+            await asyncio.sleep(0.1)
+
+        # 2. 语音合成 + 播放（仅在启用语音时）
+        if not self._voice_enabled:
+            return
+
+        # 获取情感对应的语音参数（rate, pitch）
+        voice_params = self._emotion.get_voice_params(
             emotion=msg.ai_emotion,
             intensity=msg.ai_emotion_intensity,
         )
 
-        # TTS 合成 + 播放
+        # 清洗文本（移除 emoji、噪音等）
+        clean_text = self._emotion._sanitize_for_tts(msg.ai_content)
+        if not clean_text:
+            logger.warning("清洗后文本为空，跳过语音合成")
+            return
+
         try:
-            audio_file = await self._tts.synthesize(ssml)
+            # 使用纯文本 + 情感参数合成（不使用 SSML）
+            audio_file = await self._tts.synthesize(
+                text=clean_text,
+                rate=voice_params.rate,
+                pitch=voice_params.pitch,
+            )
             if audio_file:
-                logger.info(f"语音输出：{msg.ai_content[:40]}... ({msg.ai_emotion})")
+                logger.info(f"语音输出：{clean_text} ({msg.ai_emotion})")
                 await self._tts.play(audio_file)
         except Exception as e:
             logger.error(f"TTS 处理异常：{e}")

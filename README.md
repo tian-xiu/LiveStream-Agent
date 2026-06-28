@@ -2,6 +2,9 @@
 
 一个开箱即用的虚拟主播 AI 助手，实时接收直播间弹幕，通过大模型进行智能决策，生成带情感的语音回复。
 
+<img src="./images/项目启动桌面视角.png" width="89%" >
+
+
 ## 核心链路
 
 ```
@@ -37,11 +40,13 @@
 
 - **多平台支持**：目前支持抖音和 B站，通过插件化连接器架构可轻松扩展
 - **智能决策**：LLM 输出结构化 JSON，包含回复内容、情感标签、动作类型和内心独白
-- **情感语音**：7 种情感（开心、激动、平静、共情、幽默、严肃、温柔）映射为 SSML 语音参数，通过 edge-tts 合成自然语音
+- **情感语音**：7 种情感（开心、激动、平静、共情、幽默、严肃、温柔）映射为语速/音调参数，通过 edge-tts 合成自然语音
 - **三级记忆**：短期记忆（滑动窗口）、工作记忆（会话内关键事实）、长期记忆（跨会话用户画像），SQLite 持久化
 - **人设切换**：YAML 定义的多套主播人格，支持运行时热切换
 - **防刷屏调度**：最小回复间隔、队列管理、同用户冷却、垃圾消息过滤
 - **礼物感谢**：自动识别礼物事件，生成个性化感谢语
+- **实时字幕**：桌面字幕叠加窗口，AI 回复时立即显示文字（先于语音）
+- **弹幕滚动**：左侧弹幕窗口实时滚动显示观众弹幕，持续堆积不消失
 - **会话总结**：每次直播结束后自动生成摘要存档
 - **LLM 无关**：基于 OpenAI 兼容接口，支持 DeepSeek、GPT、智谱 GLM 等任意兼容 API
 
@@ -53,7 +58,7 @@ LiveStream-Agent/
 │   ├── brain.py               # 大脑：LLM 调用、决策、响应生成
 │   ├── memory.py              # 记忆系统：三级记忆 + SQLite 存储
 │   ├── persona.py             # 人设管理：角色定义、Prompt 构建
-│   └── emotion.py             # 情感引擎：情感标签 ↔ SSML 语音参数
+│   └── emotion.py             # 情感引擎：情感标签 ↔ 语速/音调参数
 │
 ├── connectors/                # 平台连接器（插件化）
 │   ├── base.py                # 抽象基类，定义统一接口
@@ -65,8 +70,11 @@ LiveStream-Agent/
 │   └── adapter.py             # OpenAI 兼容适配器（支持 DeepSeek/GPT/GLM）
 │
 ├── speech/                    # 语音模块
-│   ├── tts.py                 # TTS 引擎：SSML → edge-tts → MP3
+│   ├── tts.py                 # TTS 引擎：纯文本 + 情感参数 → edge-tts → MP3
 │   └── player.py              # 音频播放器
+│
+├── ui/                        # 界面模块
+│   └── __init__.py            # 字幕叠加窗口 + 弹幕滚动窗口（Tkinter）
 │
 ├── pipeline/                  # 消息处理管道
 │   ├── orchestrator.py        # 管道编排器：串联整个处理流程
@@ -200,14 +208,14 @@ agent:
 
 ## 语音输出说明
 
-TTS 引擎使用 Microsoft Edge TTS（免费、中文效果好），生成的音频在本机播放。如果需要将语音推送到直播间，可以使用虚拟音频设备（如 VB-Cable）将播放输出作为麦克风输入。在 `config/settings.yaml` 中设置 `tts.auto_play: false` 可仅生成音频文件而不播放。
+TTS 引擎使用 Microsoft Edge TTS（免费、中文效果好），通过纯文本 + 语速/音调参数合成带情感的语音。生成的音频在本机播放。如果需要将语音推送到直播间，可以使用虚拟音频设备（如 VB-Cable）将播放输出作为麦克风输入。在 `config/settings.yaml` 中设置 `tts.auto_play: false` 可仅生成音频文件而不播放。
 
 ## 依赖项
 
 | 依赖 | 用途 |
 |------|------|
 | openai | LLM 统一接口（兼容 DeepSeek / GPT / GLM） |
-| edge-tts | 免费中文 TTS，支持 SSML 情感控制 |
+| edge-tts | 免费中文 TTS，通过 rate/pitch 参数控制情感 |
 | websocket-client | 抖音 WebSocket 弹幕连接 |
 | protobuf | 抖音消息协议解码 |
 | aiosqlite | 异步 SQLite 记忆存储 |
@@ -220,6 +228,36 @@ TTS 引擎使用 Microsoft Edge TTS（免费、中文效果好），生成的音
 ## 许可证
 
 MIT License
+
+---
+
+## 数据存储
+
+项目使用 SQLite 持久化数据，数据库文件位于 `data/agent_memory.db`，包含以下表：
+
+| 表 | 说明 | 关键字段 |
+|---|---|---|
+| `users` | 用户档案 | `platform_id`（平台UID）+ `platform`（平台名）联合唯一，`nickname` 仅展示 |
+| `messages` | 对话记录 | `session_id` 归属场次，`role`（user/assistant），`content`，`emotion`，`action` |
+| `sessions` | 直播场次 | `room_id`，`platform`，起止时间，`message_count`，`summary` |
+| `memories` | 长期记忆 | `user_id` + `key` 联合唯一，`value`，`importance`（权重） |
+
+
+
+## 桌面启动（Windows）
+
+项目根目录提供了桌面启动脚本，一键启动 B站 11111 直播间：
+
+```batch
+启动LiveStream-Agent.bat
+```
+
+脚本自动设置 UTF-8 编码、PYTHONPATH，并调用 conda 环境的 Python 入口。启动后弹出三个窗口：
+- **控制台窗口**：实时日志（LLM 输入/输出、TTS 合成状态）
+- **字幕悬浮窗**：AI 回复文字显示（先于语音）
+- **弹幕滚动窗**：实时显示观众弹幕，持续堆积
+
+按 `Ctrl+C` 优雅退出。
 
 ---
 

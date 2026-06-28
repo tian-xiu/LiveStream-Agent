@@ -153,16 +153,38 @@ class AudioPlayer:
             return False
 
     async def _play_powershell(self, path: str) -> bool:
-        """Windows PowerShell 音频播放（最后的兜底方案）。"""
+        """Windows PowerShell 音频播放（最后的兜底方案）。
+
+        使用 System.Windows.Media.MediaPlayer 播放 MP3，
+        通过 NaturalDuration 获取音频真实长度并等待播放完成，
+        避免 Start-Sleep 固定 2 秒导致音频被截断。
+        """
         if self._system != "Windows":
             return False
 
+        # 注意：路径中的反斜杠在 PowerShell 双引号字符串中是字面量，无需转义。
+        # 使用双引号确保路径中的空格不被拆分为多个参数。
         ps_script = (
-            f'Add-Type -AssemblyName PresentationCore; '
-            f'$player = New-Object System.Windows.Media.MediaPlayer; '
+            'Add-Type -AssemblyName PresentationCore; '
+            '$player = New-Object System.Windows.Media.MediaPlayer; '
+            # 打开音频文件
             f'$player.Open("{path}"); '
-            f'$player.Play(); '
-            f'Start-Sleep -Seconds 2'
+            # 等待元数据加载（最多 5 秒），轮询 NaturalDuration
+            '$timeout = 5; $elapsed = 0; '
+            'while (-not $player.NaturalDuration.HasTimeSpan -and $elapsed -lt $timeout) { '
+            '  Start-Sleep -Milliseconds 100; $elapsed += 0.1 '
+            '}; '
+            # 开始播放
+            '$player.Play(); '
+            # 根据音频实际长度等待（加 1 秒缓冲）
+            'if ($player.NaturalDuration.HasTimeSpan) { '
+            '  $duration = $player.NaturalDuration.TimeSpan.TotalSeconds; '
+            '  Start-Sleep -Seconds ($duration + 1) '
+            '} else { '
+            '  Start-Sleep -Seconds 10 '
+            '}; '
+            # 清理
+            '$player.Close()'
         )
 
         cmd = [
@@ -172,7 +194,8 @@ class AudioPlayer:
             "-Command",
             ps_script,
         ]
-        result = await self._run_async(cmd)
+        # PowerShell 播放可能需要较长时间（长音频文件），使用 180 秒超时
+        result = await self._run_async(cmd, timeout=180.0)
         if result:
             logger.debug("使用 PowerShell 播放音频")
         return result

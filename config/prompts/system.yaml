@@ -29,6 +29,9 @@ system_prompt: |
   ## 当前观众信息
   {{ user_profile }}
 
+  ## 你对该观众的记忆
+  {{ long_term_memories }}
+
   ---
   你必须严格按照以下 JSON 格式回复，不要输出任何其他内容：
 

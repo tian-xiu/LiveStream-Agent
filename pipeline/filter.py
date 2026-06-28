@@ -48,12 +48,14 @@ class MessageFilter:
         self._seen: OrderedDict[str, float] = OrderedDict()
         # 纯表情正则（常见颜文字、emoji 连用等）
         self._emoji_only_pattern = re.compile(
-            r"^[\U0001F600-\U0001F64F"
-            r"\U0001F300-\U0001F5FF"
-            r"\U0001F680-\U0001F6FF"
-            r"\U0001F1E0-\U0001F1FF"
-            r"\U00002702-\U000027B0"
-            r"\U000024C2-\U0001F251"
+            r"^[\U0001F600-\U0001F64F"     # Emoticons
+            r"\U0001F300-\U0001F5FF"       # Symbols & Pictographs
+            r"\U0001F680-\U0001F6FF"       # Transport & Map
+            r"\U0001F1E0-\U0001F1FF"       # Enclosed supplement
+            r"\U00002702-\U000027B0"       # Dingbats
+            r"\U00002460-\U000024FF"       # Enclosed Alphanumerics (⓪ - 🉑)
+            r"\U0001F100-\U0001F1FF"       # Enclosed Alphanumeric Supplement
+            r"\U0001F200-\U0001F2FF"       # Enclosed Ideographic Supplement
             r"\s\d]+$"
         )
 
