@@ -154,13 +154,13 @@ set LLM_API_KEY=sk-your-api-key-here        # Windows
 python main.py https://live.douyin.com/361749035935
 
 # 抖音直播间（仅 ID）
-python main.py 361749035935 --platform douyin
+python main.py 11111 --platform douyin
 
 # B站直播间
-python main.py 23564688 --platform bilibili
+python main.py 1111 --platform bilibili
 
 # 仅文本回复，不播放语音
-python main.py 361749035935 --no-voice
+python main.py 1111 --no-voice
 ```
 
 启动后，Agent 会自动连接直播间、播报开播欢迎语、处理弹幕和礼物、生成带情感的语音回复。按 `Ctrl+C` 优雅退出，会自动生成直播摘要并存储。
@@ -246,7 +246,7 @@ MIT License
 
 ## 桌面启动（Windows）
 
-项目根目录提供了桌面启动脚本，一键启动 B站 622909 直播间：
+项目根目录提供了桌面启动脚本，一键启动 B站 1111 直播间：
 
 ```batch
 启动LiveStream-Agent.bat
