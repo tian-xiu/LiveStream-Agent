@@ -246,7 +246,7 @@ MIT License
 
 ## 桌面启动（Windows）
 
-项目根目录提供了桌面启动脚本，一键启动 B站 11111 直播间：
+项目根目录提供了桌面启动脚本，一键启动 B站 622909 直播间：
 
 ```batch
 启动LiveStream-Agent.bat
