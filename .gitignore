@@ -25,10 +25,20 @@ Thumbs.db
 Desktop.ini
 
 # Project runtime data (user-specific, not for sharing)
-data/audio/
+data/
 *.log
 *.mp3
 *.wav
+*.db
+*.db-shm
+*.db-wal
+
+# Desktop launch scripts
+启动LiveStream-Agent.bat
+*.bat
+
+# User screenshots
+images/
 
 # Environment / secrets
 .env
